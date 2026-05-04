@@ -1,48 +1,91 @@
 require("dotenv").config();
+const { ethers } = require("ethers");
 
-const PROFIT_LIMIT = 30; // minimum profit
-const LOAN_AMOUNT = 50000;
+// ================= CONFIG =================
+const provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
 
-// MOCK PRICES (later real DEX se aayega)
-async function getPrices() {
-    let buyPrice = 1.00;   // Uniswap
-    let sellPrice = 1.02;  // SushiSwap
-    return { buyPrice, sellPrice };
+// Tokens (Polygon)
+const USDC = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174";
+const WETH = "0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619";
+
+// DEX Routers
+const ROUTER_A = "0xa5E0829CaCEd8fFDD4De3c43696c57F7D7A678ff"; // QuickSwap
+const ROUTER_B = "0x1b02da8cb0d097eb8d57a175b88c7d8b47997506"; // SushiSwap
+
+// Loan Range (your request)
+const MIN_LOAN = 5000;
+const MAX_LOAN = 25000;
+
+// Profit settings
+const MIN_PROFIT_USD = 30;
+
+// ABI
+const routerABI = [
+  "function getAmountsOut(uint amountIn, address[] memory path) view returns (uint[] memory)"
+];
+
+// ================= HELPERS =================
+async function getPrice(routerAddr, amountIn) {
+  const router = new ethers.Contract(routerAddr, routerABI, provider);
+  const path = [USDC, WETH];
+
+  try {
+    const out = await router.getAmountsOut(amountIn, path);
+    return out[1];
+  } catch (e) {
+    return null;
+  }
 }
 
-// PROFIT CALCULATION
-function calculateProfit(buyPrice, sellPrice) {
-
-    let grossProfit = (sellPrice - buyPrice) * LOAN_AMOUNT;
-
-    let flashLoanFee = 25;
-    let dexFees = 300;
-    let slippage = 50;
-    let gas = 10;
-
-    return grossProfit - flashLoanFee - dexFees - slippage - gas;
-}
-
-// EXECUTE TRADE
-async function executeTrade(profit) {
-    console.log("FLASH LOAN EXECUTING...");
-    console.log("Profit:", profit);
-    console.log("Transaction sent...");
-}
-
-// MAIN LOOP (1 sec check)
+// ================= BOT LOOP =================
 setInterval(async () => {
 
-    let { buyPrice, sellPrice } = await getPrices();
+  // choose test loan (start safe)
+  const loanAmount = ethers.parseUnits(MIN_LOAN.toString(), 6);
 
-    let profit = calculateProfit(buyPrice, sellPrice);
+  const priceA = await getPrice(ROUTER_A, loanAmount);
+  const priceB = await getPrice(ROUTER_B, loanAmount);
 
-    console.log("Profit Check:", profit);
+  if (!priceA || !priceB) {
+    console.log("❌ Price fetch failed");
+    return;
+  }
 
-    if (profit >= PROFIT_LIMIT) {
-        await executeTrade(profit);
+  const diff = Number(priceA - priceB) / 1e18;
+
+  // fees estimation
+  const gasFee = 5;
+  const swapFee = 0.3;
+
+  const netProfit = diff - gasFee - swapFee;
+
+  console.log("==================================");
+  console.log("Loan:", MIN_LOAN, "-", MAX_LOAN);
+  console.log("QuickSwap:", priceA.toString());
+  console.log("SushiSwap:", priceB.toString());
+  console.log("Net Profit Est:", netProfit);
+
+  // ================= TRADE LOGIC =================
+  if (netProfit >= MIN_PROFIT_USD) {
+
+    console.log("🚀 PROFITABLE OPPORTUNITY FOUND!");
+
+    // choose loan size dynamically
+    let loanToUse;
+
+    if (netProfit > 100) {
+      loanToUse = MAX_LOAN;
     } else {
-        console.log("SKIP");
+      loanToUse = MIN_LOAN;
     }
 
-}, 1000);
+    console.log("💰 Loan Selected:", loanToUse);
+
+    // HERE: smart contract call will go later
+    console.log("👉 CALL SMART CONTRACT EXECUTION");
+
+  } else {
+    console.log("❌ NO PROFIT - SKIPPING");
+  }
+
+}, 3000);
